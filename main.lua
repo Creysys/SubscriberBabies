@@ -1,6 +1,6 @@
 require("mobdebug").start()
 
-local twitchchannel = "imaqtpie"
+local twitchchannel = "cobaltstreak"
 
 local socket = require("socket")
 

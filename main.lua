@@ -1,19 +1,8 @@
 require("mobdebug").start()
 
---change this to your channel
-local twitchchannel = "cobaltstreak"
---will each sub have the same entity every time? (true/false)
-local subSeed = true
---if true change this number to switch to a different set of sub dependent entities
-local subSeedOffset = 666
---tyrone is not letting me access the gui offset so you have to adjust this yourself im sorry :S
-local subMessagePos = Vector(45, 45)
---subscriber message color
-local subMessageColor = { r = 0.8, g = 0.4, b = 0.15 }
---subscriber message duration in seconds
-local subMessageDuration = 5
---subscriber message fade out duration in seconds
-local subMessageFadeDuration = 1
+local source = debug.getinfo(1).source
+local modDir = source:sub(2, #source - 8)
+dofile(modDir.."settings.lua")
 
 local socket = require("socket")
 
@@ -26,13 +15,13 @@ local irc = {
   port = 6667,
   nick = "justinfan"..math.random(10000, 99999999),
     
-  newSubPattern = ":twitchnotify!twitchnotify@twitchnotify.tmi.twitch.tv PRIVMSG #"..twitchchannel.." :",
+  newSubPattern = ":twitchnotify!twitchnotify@twitchnotify.tmi.twitch.tv PRIVMSG #"..subscriberBabiesSettings.twitchchannel.." :",
   client = socket.tcp(),
   
   connect = function(self)
     self.client:connect(self.server, self.port)
     self.client:send("NICK "..self.nick.."\r\n")
-    self.client:send("JOIN #"..twitchchannel.."\r\n")
+    self.client:send("JOIN #"..subscriberBabiesSettings.twitchchannel.."\r\n")
     self.client:send("CAP REQ :twitch.tv/commands\r\n")
     self.client:send("CAP REQ :twitch.tv/membership\r\n")
     self.client:send("CAP REQ :twitch.tv/tags\r\n")
@@ -54,7 +43,7 @@ local irc = {
 			local nameend = line:find(" ", namestart) - 1
 			local name = line:sub(namestart, nameend)
 			return name
-		elseif	string.starts(line, "@") and line:find(":tmi.twitch.tv USERNOTICE #"..twitchchannel) then
+		elseif	string.starts(line, "@") and line:find(":tmi.twitch.tv USERNOTICE #"..subscriberBabiesSettings.twitchchannel) then
 			line = line:sub(2, line:find(":") - 1)
 			local t = {}
 			for k, v in string.gmatch(line, "([^=]*)=([^=;]*);") do
@@ -86,6 +75,7 @@ local irc = {
 local subscriberBabiesMod = {
   Name = "SubscriberBabies",
   SubMessage = nil,
+  Friendlies = {},
   AddCallback = function(self, callbackId, fn, entityId)
     if entityId == nil then entityId = -1 end
     Isaac.AddCallback(self, callbackId, fn, entityId)
@@ -109,21 +99,51 @@ local subscriberBabiesMod = {
       seed = (seed + string.byte(sub, i))*23
     end
     
-    if subSeed then
-      math.randomseed(seed + subSeedOffset)
+    if subscriberBabiesSettings.subSeed then
+      math.randomseed(seed + subscriberBabiesSettings.subSeedOffset)
     end
     
-    subtype = math.random(1, 1)
-    if subtype == 1 then
-      --enemy
-      spawnPos = Isaac.GetFreeNearPosition(Vector(math.random(-10, 10), math.random(-10, 10)), 1)
-      entity = Isaac.Spawn(EntityType.ENTITY_BOOMFLY, 0, 0, spawnPos, Vector(0, 0), nil)
+    room = Game():GetRoom()
+    subtype = math.random(1, 2)
+    if subtype == 1 then        --enemy
+      
+      for i = 0, DoorSlot.NUM_DOOR_SLOTS - 1 do
+        door = room:GetDoor(i)
+        if door then
+          door:Close(false)
+        end
+      end
+      
+      pool = subscriberBabiesSettings.subEnemies
+      poolEntry = pool[math.random(1, #pool)]
+
+      roomMin = room:GetTopLeftPos()
+      roomMax = room:GetBottomRightPos()
+      spawnPos = Isaac.GetFreeNearPosition(Vector(math.random(roomMin.X, roomMax.X), math.random(roomMin.Y, roomMax.Y)), 1)
+      entity = Isaac.Spawn(poolEntry.type, poolEntry.variant, poolEntry.subType, spawnPos, Vector(0, 0), nil)
       
       self.SubMessage = { message = sub.." has awoken!", time = 0 }
-    elseif subtype == 2 then
-      --friendly
-    else
-      --item
+      
+    elseif subtype == 2 then    --friendly
+      
+      pool = subscriberBabiesSettings.subFriendlies
+      poolEntry = pool[math.random(1, #pool)]
+
+      roomMin = room:GetTopLeftPos()
+      roomMax = room:GetBottomRightPos()
+      spawnPos = Isaac.GetFreeNearPosition(Vector(math.random(roomMin.X, roomMax.X), math.random(roomMin.Y, roomMax.Y)), 1)
+      entity = Isaac.Spawn(poolEntry.type, poolEntry.variant, poolEntry.subType, spawnPos, Vector(0, 0), nil)
+      entity:AddEntityFlags(EntityFlag.FLAG_FRIENDLY)
+      entity:AddEntityFlags(EntityFlag.FLAG_CHARM)
+      entity:AddEntityFlags(EntityFlag.FLAG_NO_TARGET)
+
+      self.Friendlies[#self.Friendlies + 1] = entity
+      self.SubMessage = { message = sub.." came to help you!", time = 0 }
+      
+    else                        --item
+      
+      
+      
     end
   end
 }
@@ -134,10 +154,45 @@ function subscriberBabiesMod:PostPlayerInit()
 end
 
 d = false
+
+local lastRoomId = nil
 function subscriberBabiesMod:PostUpdate()
+  roomId = Game():GetLevel():GetCurrentRoomIndex()
+  if not lastRoomId then
+    lastRoomId = roomId
+  end
+
+  if lastRoomId == roomId then
+    --check if friendlies died
+    for i = 1, #subscriberBabiesMod.Friendlies do
+      if subscriberBabiesMod.Friendlies[i]:IsDead() then
+        subscriberBabiesMod.Friendlies[i] = nil
+      end
+    end
+  else
+    --spawn friendlies if entered next room
+    room = Game():GetRoom()
+    newFriendlies = {}
+    for i = 1, #subscriberBabiesMod.Friendlies do
+      entity = subscriberBabiesMod.Friendlies[i]
+      if entity then
+        roomMin = room:GetTopLeftPos()
+        roomMax = room:GetBottomRightPos()
+        spawnPos = Isaac.GetFreeNearPosition(Vector(math.random(roomMin.X, roomMax.X), math.random(roomMin.Y, roomMax.Y)), 1)
+        entity = Isaac.Spawn(entity.Type, entity.Variant, entity.SubType, spawnPos, Vector(0, 0), nil)
+        entity:AddEntityFlags(EntityFlag.FLAG_FRIENDLY)
+        entity:AddEntityFlags(EntityFlag.FLAG_CHARM)
+        entity:AddEntityFlags(EntityFlag.FLAG_NO_TARGET)
+        newFriendlies[#newFriendlies + 1] = entity
+      end
+    end
+    subscriberBabiesMod.Friendlies = newFriendlies
+    lastRoomId = roomId
+  end
+
   if subscriberBabiesMod.SubMessage ~= nil then
       return
-    end
+  end
   
   sub = irc:getNextSub()
   if sub ~= nil then
@@ -155,14 +210,15 @@ function subscriberBabiesMod:PostRender()
     return
   end
   
-  alpha = 0.85
-  if subscriberBabiesMod.SubMessage.time > subMessageDuration then
-    alpha = (1 - (subscriberBabiesMod.SubMessage.time - subMessageDuration) / subMessageFadeDuration) * 0.85
+  alpha = subscriberBabiesSettings.subMessageColor.a
+  if subscriberBabiesMod.SubMessage.time > subscriberBabiesSettings.subMessageDuration then
+    alpha = alpha * (1 - (subscriberBabiesMod.SubMessage.time - subscriberBabiesSettings.subMessageDuration) / subscriberBabiesSettings.subMessageFadeDuration)
   end
   
-  Isaac.RenderText(subscriberBabiesMod.SubMessage.message, subMessagePos.X, subMessagePos.Y, 0.8, 0.4, 0.15, alpha)
+  Isaac.RenderText(subscriberBabiesMod.SubMessage.message, subscriberBabiesSettings.subMessagePos.X, subscriberBabiesSettings.subMessagePos.Y,
+    subscriberBabiesSettings.subMessageColor.r, subscriberBabiesSettings.subMessageColor.g, subscriberBabiesSettings.subMessageColor.b, alpha)
   subscriberBabiesMod.SubMessage.time = subscriberBabiesMod.SubMessage.time + 1/60
-  if subscriberBabiesMod.SubMessage.time >= subMessageDuration + subMessageFadeDuration then
+  if subscriberBabiesMod.SubMessage.time >= subscriberBabiesSettings.subMessageDuration + subscriberBabiesSettings.subMessageFadeDuration then
     subscriberBabiesMod.SubMessage = nil
   end
 end

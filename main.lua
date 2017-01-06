@@ -17,6 +17,7 @@ local irc = {
     
   newSubPattern = ":twitchnotify!twitchnotify@twitchnotify.tmi.twitch.tv PRIVMSG #"..subscriberBabiesSettings.twitchchannel.." :",
   client = socket.tcp(),
+  connected = false,
   
   connect = function(self)
     self.client:connect(self.server, self.port)
@@ -26,11 +27,16 @@ local irc = {
     self.client:send("CAP REQ :twitch.tv/membership\r\n")
     self.client:send("CAP REQ :twitch.tv/tags\r\n")
     self.client:settimeout(0)
+    self.connected = true
   end,
   
   receive = function(self)
     line, err = self.client:receive()
     
+    if err == "closed" then
+      self.connected = false
+      return nil
+    end
     if line == nil or err == "timeout" then return nil end
     return line
   end,
@@ -75,7 +81,7 @@ local irc = {
 local subscriberBabiesMod = {
   Name = "SubscriberBabies",
   SubMessage = nil,
-  Friendlies = {},
+  SubEntities = {},
   AddCallback = function(self, callbackId, fn, entityId)
     if entityId == nil then entityId = -1 end
     Isaac.AddCallback(self, callbackId, fn, entityId)
@@ -106,14 +112,7 @@ local subscriberBabiesMod = {
     room = Game():GetRoom()
     subtype = math.random(1, 2)
     if subtype == 1 then        --enemy
-      
-      for i = 0, DoorSlot.NUM_DOOR_SLOTS - 1 do
-        door = room:GetDoor(i)
-        if door then
-          door:Close(false)
-        end
-      end
-      
+
       pool = subscriberBabiesSettings.subEnemies
       poolEntry = pool[math.random(1, #pool)]
 
@@ -121,7 +120,8 @@ local subscriberBabiesMod = {
       roomMax = room:GetBottomRightPos()
       spawnPos = Isaac.GetFreeNearPosition(Vector(math.random(roomMin.X, roomMax.X), math.random(roomMin.Y, roomMax.Y)), 1)
       entity = Isaac.Spawn(poolEntry.type, poolEntry.variant, poolEntry.subType, spawnPos, Vector(0, 0), nil)
-      
+
+      self.SubEntities[#self.SubEntities + 1] = { entity = entity, name = sub }
       self.SubMessage = { message = sub.." has awoken!", time = 0 }
       
     elseif subtype == 2 then    --friendly
@@ -137,7 +137,7 @@ local subscriberBabiesMod = {
       entity:AddEntityFlags(EntityFlag.FLAG_CHARM)
       entity:AddEntityFlags(EntityFlag.FLAG_NO_TARGET)
 
-      self.Friendlies[#self.Friendlies + 1] = entity
+      self.SubEntities[#self.SubEntities + 1] = { entity = entity, name = sub }
       self.SubMessage = { message = sub.." came to help you!", time = 0 }
       
     else                        --item
@@ -153,40 +153,44 @@ function subscriberBabiesMod:PostPlayerInit()
   irc:connect()
 end
 
-d = false
-
 local lastRoomId = nil
 function subscriberBabiesMod:PostUpdate()
+  --Reconnect every minute
+  if not irc.connected and Isaac.GetFrameCount() % 3600 == 0 then
+    irc:connect()
+    Isaac.DebugString("subscriberBabiesMod: Reconnecting...")
+  end
+
   roomId = Game():GetLevel():GetCurrentRoomIndex()
   if not lastRoomId then
     lastRoomId = roomId
   end
 
   if lastRoomId == roomId then
-    --check if friendlies died
-    for i = 1, #subscriberBabiesMod.Friendlies do
-      if subscriberBabiesMod.Friendlies[i]:IsDead() then
-        subscriberBabiesMod.Friendlies[i] = nil
+    --check if subs died
+    for i = 1, #subscriberBabiesMod.SubEntities do
+      sub = subscriberBabiesMod.SubEntities[i]
+      if sub and sub.entity:IsDead() then
+        subscriberBabiesMod.SubEntities[i] = nil
       end
     end
   else
-    --spawn friendlies if entered next room
+    --remove dead subs and spawn alive ones if entered next room
     room = Game():GetRoom()
-    newFriendlies = {}
-    for i = 1, #subscriberBabiesMod.Friendlies do
-      entity = subscriberBabiesMod.Friendlies[i]
-      if entity then
+    newSubEntities = {}
+
+    for i = 1, #subscriberBabiesMod.SubEntities do
+      sub = subscriberBabiesMod.SubEntities[i]
+      if sub then
         roomMin = room:GetTopLeftPos()
         roomMax = room:GetBottomRightPos()
         spawnPos = Isaac.GetFreeNearPosition(Vector(math.random(roomMin.X, roomMax.X), math.random(roomMin.Y, roomMax.Y)), 1)
-        entity = Isaac.Spawn(entity.Type, entity.Variant, entity.SubType, spawnPos, Vector(0, 0), nil)
-        entity:AddEntityFlags(EntityFlag.FLAG_FRIENDLY)
-        entity:AddEntityFlags(EntityFlag.FLAG_CHARM)
-        entity:AddEntityFlags(EntityFlag.FLAG_NO_TARGET)
-        newFriendlies[#newFriendlies + 1] = entity
+        entity = Isaac.Spawn(sub.entity.Type, sub.entity.Variant, sub.entity.SubType, spawnPos, Vector(0, 0), nil)
+        entity:AddEntityFlags(sub.entity:GetEntityFlags())
+        newSubEntities[#newSubEntities + 1] = { entity = entity, name = sub.name}
       end
     end
-    subscriberBabiesMod.Friendlies = newFriendlies
+    subscriberBabiesMod.SubEntities = newSubEntities
     lastRoomId = roomId
   end
 
@@ -199,13 +203,33 @@ function subscriberBabiesMod:PostUpdate()
     subscriberBabiesMod:SpawnSub(sub)
 	end
   
-  if not d then
+  if subscriberBabiesSettings.debug then
+    subscriberBabiesMod:SpawnSub("Abc")
     subscriberBabiesMod:SpawnSub("Creysys")
-    d = true
+    subscriberBabiesMod:SpawnSub("AverageName555")
+    subscriberBabiesMod:SpawnSub("SomeOtherPrettyLongNameLUL")
+    subscriberBabiesSettings.debug = false
   end
 end
 
 function subscriberBabiesMod:PostRender()
+  --draw sub names
+
+  for i = 1, #subscriberBabiesMod.SubEntities do
+      sub = subscriberBabiesMod.SubEntities[i]
+      if sub then
+        pos = sub.entity.Position
+        pos.X = pos.X - #sub.name*4.5
+        pos.Y = pos.Y - 80
+        pos = Isaac.WorldToScreenPosition(pos, true)
+        Isaac.RenderText(sub.name, pos.X, pos.Y, subscriberBabiesSettings.subNameColor.r,
+          subscriberBabiesSettings.subNameColor.g, subscriberBabiesSettings.subNameColor.b,
+          subscriberBabiesSettings.subNameColor.a)
+      end
+  end
+
+
+
   if subscriberBabiesMod.SubMessage == nil then
     return
   end

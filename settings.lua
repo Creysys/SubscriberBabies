@@ -13,6 +13,10 @@ subscriberBabiesSettings = {
 	subMessageDuration = 5,
 	--subscriber message fade out duration in seconds
 	subMessageFadeDuration = 1,
+	--subscriber name color
+	subNameColor = { r = 1, g = 1, b = 1, a = 0.85 },
+	--spawns a few test subs on startup
+	debug = true,
 
 	subEnemies = {
 		{ type = EntityType.ENTITY_BOOMFLY, variant = 0, subType = 0 }

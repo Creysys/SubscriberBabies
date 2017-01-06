@@ -37,7 +37,7 @@ local irc = {
       self.connected = false
       return nil
     end
-    if line == nil or err == "timeout" then return nil end
+    if not line or err == "timeout" then return nil end
     return line
   end,
 
@@ -67,10 +67,10 @@ local irc = {
   getNextSub = function(self)
     for i = 1, 8 do
       line = self:receive()
-      if line == nil then break end
+      if not line then break end
       
       sub = self:parseSub(line)
-      if sub ~= nil then
+      if sub then
         return sub
       end
     end
@@ -78,40 +78,45 @@ local irc = {
   end
 }
 
+local function GetSubSeed(sub)
+  seed = 0
+  for i = 1, #sub do
+    seed = (seed + string.byte(sub, i))*23
+  end
+  return seed
+end
+
 local subscriberBabiesMod = {
   Name = "SubscriberBabies",
   SubMessage = nil,
   SubEntities = {},
   AddCallback = function(self, callbackId, fn, entityId)
-    if entityId == nil then entityId = -1 end
+    if not entityId then entityId = -1 end
     Isaac.AddCallback(self, callbackId, fn, entityId)
   end,
   SaveData = function(self, data)
       Isaac.SaveModData(self, data)
-    end,
-    LoadData = function(self)
+  end,
+  LoadData = function(self)
       return Isaac.LoadModData(self)
-    end,
-    HasData = function(self)
+  end,
+  HasData = function(self)
       return Isaac.HasModData(self)
-    end,
-    RemoveData = function(self)
+  end,
+  RemoveData = function(self)
       Isaac.RemoveModData(self)
-    end,
-    
+  end,
+
   SpawnSub = function(self, sub)
-    seed = 0
-    for i = 1, #sub do
-      seed = (seed + string.byte(sub, i))*23
-    end
+    seed = GetSubSeed(sub)
     
     if subscriberBabiesSettings.subSeed then
       math.randomseed(seed + subscriberBabiesSettings.subSeedOffset)
     end
     
     room = Game():GetRoom()
-    subtype = math.random(1, 2)
-    if subtype == 1 then        --enemy
+    subtype = math.random(1, 8)
+    if subtype == 1 then                                       --enemy
 
       pool = subscriberBabiesSettings.subEnemies
       poolEntry = pool[math.random(1, #pool)]
@@ -121,10 +126,18 @@ local subscriberBabiesMod = {
       spawnPos = Isaac.GetFreeNearPosition(Vector(math.random(roomMin.X, roomMax.X), math.random(roomMin.Y, roomMax.Y)), 1)
       entity = Isaac.Spawn(poolEntry.type, poolEntry.variant, poolEntry.subType, spawnPos, Vector(0, 0), nil)
 
-      self.SubEntities[#self.SubEntities + 1] = { entity = entity, name = sub }
+      npc = entity:ToNPC()
+      if npc then
+        if math.random(1, 3) == 1 then
+          npc:MakeChampion(seed)
+          self.SubEntities[#self.SubEntities + 1] = { entity = entity, name = sub, champion = true }
+        else
+          self.SubEntities[#self.SubEntities + 1] = { entity = entity, name = sub, champion = false }
+        end
+      end
       self.SubMessage = { message = sub.." has awoken!", time = 0 }
       
-    elseif subtype == 2 then    --friendly
+    elseif subtype == 2 or subtype == 3 or subtype == 4 or subtype == 5 then    --friendly
       
       pool = subscriberBabiesSettings.subFriendlies
       poolEntry = pool[math.random(1, #pool)]
@@ -133,21 +146,58 @@ local subscriberBabiesMod = {
       roomMax = room:GetBottomRightPos()
       spawnPos = Isaac.GetFreeNearPosition(Vector(math.random(roomMin.X, roomMax.X), math.random(roomMin.Y, roomMax.Y)), 1)
       entity = Isaac.Spawn(poolEntry.type, poolEntry.variant, poolEntry.subType, spawnPos, Vector(0, 0), nil)
-      entity:AddEntityFlags(EntityFlag.FLAG_FRIENDLY)
-      entity:AddEntityFlags(EntityFlag.FLAG_CHARM)
-      entity:AddEntityFlags(EntityFlag.FLAG_NO_TARGET)
+      npc = entity:ToNPC()
+      if npc then
+        entity:AddEntityFlags(EntityFlag.FLAG_FRIENDLY)
+        entity:AddEntityFlags(EntityFlag.FLAG_CHARM)
+        entity:AddEntityFlags(EntityFlag.FLAG_NO_TARGET)
+        if math.random(1, 2) == 1 then
+          npc:MakeChampion(seed)
+          self.SubEntities[#self.SubEntities + 1] = { entity = entity, name = sub, champion = true }
+        else
+          self.SubEntities[#self.SubEntities + 1] = { entity = entity, name = sub, champion = false }
+        end
+      end
 
-      self.SubEntities[#self.SubEntities + 1] = { entity = entity, name = sub }
       self.SubMessage = { message = sub.." came to help you!", time = 0 }
       
-    else                        --item
+    elseif subtype == 6 or subtype == 7 or evilPresent  then                    ---good item
+
+      pool = subscriberBabiesSettings.subGoodItems
+      poolEntry = pool[math.random(1, #pool)]
+
+      roomMin = room:GetTopLeftPos()
+      roomMax = room:GetBottomRightPos()
+      spawnPos = Isaac.GetFreeNearPosition(Vector(math.random(roomMin.X, roomMax.X), math.random(roomMin.Y, roomMax.Y)), 1)
+      entity = Isaac.Spawn(EntityType.ENTITY_PICKUP, PickupVariant.PICKUP_COLLECTIBLE, poolEntry, spawnPos, Vector(0, 0), nil)
+
+      self.SubMessage = { message = sub.." has a present for you!", time = 0 }
+
+    else                                                          --bad item
       
-      
-      
+      pool = subscriberBabiesSettings.subBadItems
+      poolEntry = pool[math.random(1, #pool)]
+
+      roomMin = room:GetTopLeftPos()
+      roomMax = room:GetBottomRightPos()
+      spawnPos = Isaac.GetFreeNearPosition(Vector(math.random(roomMin.X, roomMax.X), math.random(roomMin.Y, roomMax.Y)), 1)
+      self.evilPresent = { doors = {} }
+      self.evilPresent.entity = Isaac.Spawn(EntityType.ENTITY_PICKUP, PickupVariant.PICKUP_COLLECTIBLE, poolEntry, spawnPos, Vector(0, 0), nil)
+
+      for i = 0, DoorSlot.NUM_DOOR_SLOTS - 1 do
+        door = room:GetDoor(i)
+        if door then
+          self.evilPresent.doors[i] = door:IsOpen()
+          door:Close(false)
+          Isaac.DebugString("closed")
+        end
+      end
+
+      self.SubMessage = { message = sub.." has an evil present for you!", time = 0 }
+
     end
   end
 }
-
 
 function subscriberBabiesMod:PostPlayerInit()
   irc:connect()
@@ -161,6 +211,7 @@ function subscriberBabiesMod:PostUpdate()
     Isaac.DebugString("subscriberBabiesMod: Reconnecting...")
   end
 
+  room = Game():GetRoom()
   roomId = Game():GetLevel():GetCurrentRoomIndex()
   if not lastRoomId then
     lastRoomId = roomId
@@ -176,7 +227,6 @@ function subscriberBabiesMod:PostUpdate()
     end
   else
     --remove dead subs and spawn alive ones if entered next room
-    room = Game():GetRoom()
     newSubEntities = {}
 
     for i = 1, #subscriberBabiesMod.SubEntities do
@@ -185,21 +235,38 @@ function subscriberBabiesMod:PostUpdate()
         roomMin = room:GetTopLeftPos()
         roomMax = room:GetBottomRightPos()
         spawnPos = Isaac.GetFreeNearPosition(Vector(math.random(roomMin.X, roomMax.X), math.random(roomMin.Y, roomMax.Y)), 1)
-        entity = Isaac.Spawn(sub.entity.Type, sub.entity.Variant, sub.entity.SubType, spawnPos, Vector(0, 0), nil)
+        entity = Isaac.Spawn(sub.entity.Type, sub.entity.Variant, sub.entity.SubType, sub.entity.Position, Vector(0, 0), nil)
         entity:AddEntityFlags(sub.entity:GetEntityFlags())
-        newSubEntities[#newSubEntities + 1] = { entity = entity, name = sub.name}
+        if sub.champion then
+          entity:ToNPC():MakeChampion(GetSubSeed(sub.name))
+        end
+        newSubEntities[#newSubEntities + 1] = { entity = entity, name = sub.name, champion = sub.champion}
       end
     end
     subscriberBabiesMod.SubEntities = newSubEntities
     lastRoomId = roomId
   end
 
-  if subscriberBabiesMod.SubMessage ~= nil then
+  --check if evil present has been taken to open doors
+  if evilPresent then
+    if evilPresent.entity:ToPickup().Touched then
+      for i = 0, DoorSlot.NUM_DOOR_SLOTS - 1 do
+        door = room:GetDoor(i)
+        if door and evilPresent.doors[i] then
+          door.Open()
+          Isaac.DebugString("opened")
+        end
+      end
+      evilPresent = nil
+    end
+  end
+
+  if subscriberBabiesMod.SubMessage then
       return
   end
   
   sub = irc:getNextSub()
-  if sub ~= nil then
+  if sub then
     subscriberBabiesMod:SpawnSub(sub)
 	end
   
@@ -230,7 +297,7 @@ function subscriberBabiesMod:PostRender()
 
 
 
-  if subscriberBabiesMod.SubMessage == nil then
+  if not subscriberBabiesMod.SubMessage then
     return
   end
   

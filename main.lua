@@ -116,7 +116,6 @@ local subscriberBabiesMod = {
     
     room = Game():GetRoom()
     subtype = math.random(1, 8)
-    subtype = 8
     if subtype == 1 then                                       --enemy
 
       pool = subscriberBabiesSettings.subEnemies
@@ -278,10 +277,10 @@ function subscriberBabiesMod:PostUpdate()
 	end
   
   if subscriberBabiesSettings.debug then
-    --subscriberBabiesMod:SpawnSub("Abc")
+    subscriberBabiesMod:SpawnSub("Abc")
     subscriberBabiesMod:SpawnSub("Creysys")
-    --subscriberBabiesMod:SpawnSub("AverageName555")
-    --subscriberBabiesMod:SpawnSub("SomeOtherPrettyLongNameLUL")
+    subscriberBabiesMod:SpawnSub("AverageName555")
+    subscriberBabiesMod:SpawnSub("SomeOtherPrettyLongNameLUL")
     subscriberBabiesSettings.debug = false
   end
 end

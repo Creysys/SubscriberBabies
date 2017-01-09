@@ -1,4 +1,4 @@
-require("mobdebug").start()
+StartDebug()
 
 local source = debug.getinfo(1).source
 local modDir = source:sub(2, #source - 8)
@@ -116,6 +116,7 @@ local subscriberBabiesMod = {
     
     room = Game():GetRoom()
     subtype = math.random(1, 8)
+    subtype = 8
     if subtype == 1 then                                       --enemy
 
       pool = subscriberBabiesSettings.subEnemies
@@ -181,15 +182,13 @@ local subscriberBabiesMod = {
       roomMin = room:GetTopLeftPos()
       roomMax = room:GetBottomRightPos()
       spawnPos = Isaac.GetFreeNearPosition(Vector(math.random(roomMin.X, roomMax.X), math.random(roomMin.Y, roomMax.Y)), 1)
-      self.evilPresent = { doors = {} }
-      self.evilPresent.entity = Isaac.Spawn(EntityType.ENTITY_PICKUP, PickupVariant.PICKUP_COLLECTIBLE, poolEntry, spawnPos, Vector(0, 0), nil)
+      self.evilPresent = { item = poolEntry, doors = {} }
+      Isaac.Spawn(EntityType.ENTITY_PICKUP, PickupVariant.PICKUP_COLLECTIBLE, poolEntry, spawnPos, Vector(0, 0), nil)
 
       for i = 0, DoorSlot.NUM_DOOR_SLOTS - 1 do
         door = room:GetDoor(i)
         if door then
           self.evilPresent.doors[i] = door:IsOpen()
-          door:Close(false)
-          Isaac.DebugString("closed")
         end
       end
 
@@ -248,16 +247,24 @@ function subscriberBabiesMod:PostUpdate()
   end
 
   --check if evil present has been taken to open doors
-  if evilPresent then
-    if evilPresent.entity:ToPickup().Touched then
+  if subscriberBabiesMod.evilPresent then
+    if Isaac.GetPlayer(0):HasCollectible(subscriberBabiesMod.evilPresent.item) then
       for i = 0, DoorSlot.NUM_DOOR_SLOTS - 1 do
         door = room:GetDoor(i)
-        if door and evilPresent.doors[i] then
-          door.Open()
-          Isaac.DebugString("opened")
+        if door and subscriberBabiesMod.evilPresent.doors[i] then
+          door:Open()
         end
       end
-      evilPresent = nil
+      subscriberBabiesMod.evilPresent = nil
+    else
+      for i = 0, DoorSlot.NUM_DOOR_SLOTS - 1 do
+        door = room:GetDoor(i)
+        if door then
+          self.evilPresent.doors[i] = self.evilPresent.doors[i] or door:IsOpen()
+          door:Close(false)
+        end
+      end
+      room:KeepDoorsClosed()
     end
   end
 
@@ -271,24 +278,24 @@ function subscriberBabiesMod:PostUpdate()
 	end
   
   if subscriberBabiesSettings.debug then
-    subscriberBabiesMod:SpawnSub("Abc")
+    --subscriberBabiesMod:SpawnSub("Abc")
     subscriberBabiesMod:SpawnSub("Creysys")
-    subscriberBabiesMod:SpawnSub("AverageName555")
-    subscriberBabiesMod:SpawnSub("SomeOtherPrettyLongNameLUL")
+    --subscriberBabiesMod:SpawnSub("AverageName555")
+    --subscriberBabiesMod:SpawnSub("SomeOtherPrettyLongNameLUL")
     subscriberBabiesSettings.debug = false
   end
 end
 
 function subscriberBabiesMod:PostRender()
   --draw sub names
-
+  room = Game():GetRoom()
   for i = 1, #subscriberBabiesMod.SubEntities do
       sub = subscriberBabiesMod.SubEntities[i]
       if sub then
         pos = sub.entity.Position
         pos.X = pos.X - #sub.name*4.5
         pos.Y = pos.Y - 80
-        pos = Isaac.WorldToScreenPosition(pos, true)
+        pos = room:WorldToScreenPosition(pos, true)
         Isaac.RenderText(sub.name, pos.X, pos.Y, subscriberBabiesSettings.subNameColor.r,
           subscriberBabiesSettings.subNameColor.g, subscriberBabiesSettings.subNameColor.b,
           subscriberBabiesSettings.subNameColor.a)
@@ -318,5 +325,3 @@ Isaac.RegisterMod(subscriberBabiesMod, subscriberBabiesMod.Name, 1)
 subscriberBabiesMod:AddCallback(ModCallbacks.MC_POST_PLAYER_INIT, subscriberBabiesMod.PostPlayerInit)
 subscriberBabiesMod:AddCallback(ModCallbacks.MC_POST_UPDATE, subscriberBabiesMod.PostUpdate)
 subscriberBabiesMod:AddCallback(ModCallbacks.MC_POST_RENDER, subscriberBabiesMod.PostRender)
-
-
